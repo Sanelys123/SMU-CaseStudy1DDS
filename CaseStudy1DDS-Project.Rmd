@@ -1,0 +1,785 @@
+---
+title: "Case Study - Attrition"
+author: "Samson Akomolafe"
+date: "2024-10-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Load packages required 
+library(ggthemes) 
+library(scales)
+library(tidyverse)
+library(GGally)
+library(plotly)
+#library(plyr)
+library(jsonlite)
+library(e1071)
+library(caret)
+library(class)
+#library(naniar)
+library(forcats)
+library(dplyr)
+#install.packages("pheatmap")
+library(pheatmap)
+#install.packages("corrplot")
+library(corrplot)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+#install.packages("infotheo")
+library(infotheo)
+library(reshape2)
+library(yardstick)
+library(gridExtra)
+
+```
+
+```{r}
+
+# Upload the Dataset "CaseStudy1-data"
+attritted_staff = read.csv(file.choose(),header = TRUE)
+
+# Copy the file into another file called "data" in order to keep the original upload file intact
+data = attritted_staff
+data
+
+#Data Overview
+head(data) #display the first 6 columns
+str(data) #display the structure of the dataset
+summary(data) #checking statistical summary of the dataset
+dim(data) #check the number of columns and rows in the dataset
+
+#checking important columns attributes of the dataset
+str(data$Attrition)
+str(data$Age)
+
+#checking missing data 
+missing_data = sum(is.na(data))
+missing_data
+
+#Observation:
+#there are no missing values in the dataset
+
+#checking duplicate values in the dataset
+duplicate_data = sum(duplicated(data))
+duplicate_data
+
+#Observation:
+#there are no duplicated entries in the dataset
+
+
+#shorten the length of long character strings in some columns for ease of data manipulations
+data = data %>% mutate(JobRole = recode(JobRole,
+                        "Healthcare Representative"="Health Rep",
+                        "Human Resources"="HR",
+                        "Laboratory Technician"="Lab Tech",
+                        "Manager"="Mger",
+                        "Manufacturing Director"="Man DIR",
+                        "Research Scientist"="Res Sc",
+                        "Sales Executive"="Sales Ex",
+                        "Sales Representative"="Sales Rep",
+                        "Research Director"="Res DIR"))
+
+data = data %>% mutate(Department = recode(Department,
+                                           "Human Resources"="HR",
+                                           "Sales"="Sales",
+                                           "Research & Development"="R & D"))
+
+data = data %>% mutate(EducationField = recode(EducationField,
+                                           "Life Sciences"="Life Sc.",
+                                           "Medical"="Medical",
+                                           "Technical Degree"="Tech.Degree",
+                                           "Marketing"="Marketing",
+                                           "Other"="Other"))
+
+
+#to determine the number of categorical columns in the data-set
+cate_cols = sapply(data, function(x) is.factor(x) || is.character(x))
+cate_cols
+
+# Convert to a data frame for a table-like display of the categorical columns
+cate_table <- data.frame(UniqueCount = sapply(data[, cate_cols, drop = FALSE], function(x) {
+     length(unique(x))
+   }))
+cate_table
+
+#Observation:
+#there are 9 columns that has strings values and I have to check them to see thier attritions
+
+```
+
+```{r}
+
+#1.  Question: In the dataset, what does Relationship Satisfaction mean...(relationship to manager, to peers)
+#Relationship satisfaction with manager.
+
+relationship = data %>% select(RelationshipSatisfaction,PerformanceRating,YearsWithCurrManager)
+
+relationship %>%
+  pivot_longer(cols = c(RelationshipSatisfaction,PerformanceRating,YearsWithCurrManager), 
+               names_to = "Column", values_to = "Value") %>%
+  ggplot(aes(x = Value, y = ..count.. / sum(..count..) * 100, fill = Column)) +
+  geom_histogram(position = "dodge") +
+  ylab("Percentage") +
+  ggtitle("Histogram of Percentage of Effect of Relationship Satisfaction")
+
+ #Observation
+#My observation has been stated in my powerpoint file. 
+
+#2. Advice: Don't eliminate variables simply because they have a high correlation with one another.  This is an #indication that they do share some information although the information they don't share may be correlated #with the response individually.  
+
+#3. Advice: When plotting and exploring attrition, the percentage of those who left is probably more useful #than the count.  
+
+attrition_pct <- data %>% 
+  group_by(Attrition) %>% 
+  summarise(Count = n()) %>% 
+  mutate(Percentage = Count / sum(Count) * 100)
+
+# Create a bar plot
+ggplot(attrition_pct, aes(x = Attrition, y = Percentage, fill = Attrition)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(round(Percentage, 1), "%")), vjust = -0.5) + # Add labels
+  labs(title = "Attrition Percentage of Our Dataset", 
+       y = "Percentage") +
+  theme_minimal() 
+
+ #Observation
+#My observation has been stated in my powerpoint file.
+
+#4. Question: Is the dataset, is the distance from home in miles or kilos?
+#We don't have that information (however we do know whether its high or low)
+
+ggplot(data, aes(x = DistanceFromHome))+ geom_bar()+
+  labs(title = "Bar Chart of Distance Employee Travels to Work From Home")
+
+
+#5.  Question: In the dataset: what is the definition of pay rates: Hourly, Daily & Monthly.  These values to not seem to relate to each other or the Monthly Salary (which is different than Monthly Rate).
+
+pay_grading = data %>% select(MonthlyRate, HourlyRate, DailyRate)
+
+pay_grading %>%
+  pivot_longer(cols = c(MonthlyRate, HourlyRate, DailyRate), 
+               names_to = "Column", values_to = "Value") %>%
+  ggplot(aes(x = Value, fill = Column)) +
+  geom_histogram(position = "dodge") + 
+  ggtitle("Grouped Histogram of The Pay Rates")
+ 
+#We don't have that information (however we do know whether they are high or low). They may or may not relate #to each other or the monthly salary (this is for the student to infer and decide whether there's any #correlation or whether this is a useful feature for attrition)
+
+data %>%select(MonthlyRate, HourlyRate, DailyRate) %>%ggpairs(aes(color = as.factor(data$Attrition)))+ 
+  ggtitle( "Correlation of the Pay Rates")+ xlab("MonthlyRate, HourlyRate, DailyRate") + ylab("Attrition")
+
+#6. Question: In the dataset: we do see that Job Levels go from 1-5 and assume that 1 may symbolize a lower #level employee, but this is not defined.  Though this level does have evidence of a positive linear #relationship with Monthly Income, it does not seem to correlate well with the Job Titles. in other words #someone with a Director can be a 2-5, and manager a 3-5.
+
+#Yes we can assume 1 is a lower job level than 5. 
+
+ggplot(data, aes(MonthlyIncome, fill = factor(Attrition))) + 
+  geom_histogram() + 
+   facet_grid(.~JobLevel)+
+  ggtitle( " Showing Job Attrition by Monthly Income and Job Level")+ ylab("Attrition levels")
+
+#7. Question: In the dataset, does overtime mean Hourly vs. Salaried worker?
+
+data %>%select(MonthlyIncome, HourlyRate, OverTime) %>% ggpairs(aes(color = as.factor(data$OverTime)))+ 
+  ggtitle("Plot To Show Overtime As Related to Hourly & Salaried worker")+ xlab("Monthly Income, Hourly Rate and Overtime") + ylab("Possibility of Overtime")
+
+#We can assume that people with overtime are non-exempt / hourly employees.
+
+#8 Question: In the dataset, Performance Ratings are only 3 & 4, is there a mistake?  Unless a corrupted #system, hard to imagine ratings consistently high, even as 2 still means "good".
+#It is self-reported data, think about why the employees may only answer 3 and 4
+
+#No this is the only data we have, there is no mistake. 
+
+ggplot(data, aes(x = PerformanceRating))+ geom_bar()+
+  labs(title = "Bar Chart of Performance Rating")
+
+#9 Question: In the dataset, does Training times mean: hours, weeks, or instances and over what period?
+
+#Training times last year means number of training sessions attended by the employee. 
+#histogram
+ggplot(data, aes(TrainingTimesLastYear, fill = factor(Attrition))) + 
+  geom_histogram() + 
+   facet_grid(.~JobRole)
+
+
+ggplot(data, aes(TrainingTimesLastYear, fill = factor(JobRole))) + 
+  geom_histogram() + 
+   facet_grid(.~JobLevel)+
+  ggtitle( " Showing No of Training Last Year by Job Level")+ ylab("Job Role")
+
+
+#10. Question: Do we have any information on the other columns?
+
+                                                 
+ggplot(data, aes(Age, fill = factor(Attrition))) + 
+  geom_histogram() + 
+   facet_grid(.~Gender)+
+  ggtitle( " Showing Job Attrition by Age and Gender")+ ylab("Attrition levels")
+
+ggplot(data, aes(Age, fill = factor(Attrition))) + 
+  geom_histogram() + 
+   facet_grid(.~EducationField)+
+  ggtitle( " Showing Job Attrition by Age and Education Field")+ ylab("Attrition levels")
+
+ggplot(data, aes(Age, fill = factor(Attrition))) + 
+  geom_histogram() + 
+   facet_grid(.~MaritalStatus)+
+  ggtitle( " Showing Job Attrition by Age and Marital Status")+ ylab("Attrition levels")
+
+ggplot(data, aes(Education, fill = factor(Attrition))) + 
+  geom_histogram() + 
+   facet_grid(.~MaritalStatus)+
+  ggtitle( " Showing Job Attrition by Education and Marital Status")+ ylab("Attrition levels")
+
+ggplot(data, aes(MonthlyIncome, fill = factor(Attrition))) + 
+  geom_histogram() + 
+   facet_grid(.~MaritalStatus)+
+  ggtitle( " Showing Job Attrition by Monthly Income and Marital Status")+ ylab("Attrition levels")
+
+ggplot(data, aes(MonthlyIncome, fill = factor(Attrition))) + 
+  geom_histogram() + 
+   facet_grid(.~JobRole)+coord_flip() +
+  ggtitle( " Showing Job Attrition by Monthly Income and Job Role")+ ylab("Attrition levels")
+
+ggplot(data, aes(YearsAtCompany, fill = factor(Attrition))) + 
+  geom_histogram() + 
+   facet_grid(.~BusinessTravel)+coord_flip() +
+  ggtitle( " Showing Job Attrition by Years At Company and Business Travel")+ ylab("Attrition levels")
+
+ggplot(data, aes(YearsSinceLastPromotion, fill = factor(Attrition))) + 
+  geom_histogram() + 
+   facet_grid(.~BusinessTravel)+
+  ggtitle( " Showing Job Attrition by Business Travel and Years Last Promotion")+ ylab("Attrition levels")
+
+ggplot(data, aes(YearsWithCurrManager, fill = factor(Attrition))) + 
+  geom_histogram() + 
+   facet_grid(.~Department)+
+  ggtitle( " Showing Job Attrition by Years with Current manager and Department")+ ylab("Attrition levels")
+
+ggplot(data, aes(HourlyRate, fill = factor(Attrition))) + 
+  geom_histogram() + 
+   facet_grid(.~Department)+
+  ggtitle( " Showing Job Attrition by Years with Current manager and Department")+ ylab("Attrition levels")
+
+ggplot(data, aes(RelationshipSatisfaction, fill = factor(Attrition))) + 
+  geom_bar() + 
+   facet_grid(.~JobRole)+
+  ggtitle( " Showing Job Attrition by Business Travel and Years Last Promotion")+ ylab("Attrition levels")
+
+
+data %>%select(Age, MaritalStatus) %>%ggpairs(aes(color = as.factor(data$Attrition)))+ 
+  ggtitle( " Age And Marital Status")+ xlab("Age and Marital Status") + ylab("Attrition")
+
+data %>%select(Age, Gender) %>%ggpairs(aes(color = as.factor(data$Attrition)))+ 
+  ggtitle( " Age And Marital Status")+ xlab("Age and Gender") + ylab("Attrition")
+
+```
+
+```{r}
+#Based on my observation above using histograms and bar-charts, I concluded
+#that I need to group the integer values together and observe their attrition
+#My main objective is to trim down those integers variables to six or so, this ones I will use
+#for modeling
+
+# I will use GGPAIRS and HISTOGRAMS to carry out this process
+
+# First I want to separate all the columns that contains integers values
+
+integer_data = data.frame(data %>% select(where(is.integer))%>%select(-ID, -EmployeeNumber, -EmployeeCount))
+head(integer_data)
+
+# Also I decided to break the integer columns into 4 groups, in order to be able to see 
+# the data clearly concerning their attrition
+
+#Group 1
+intgrp1 = as.data.frame(data %>%select(Age,DailyRate,DistanceFromHome,Education,
+                              StockOptionLevel,EnvironmentSatisfaction,Attrition))
+head(intgrp1)
+#Group 2
+intgrp2 = as.data.frame(data %>%select(HourlyRate,
+                              JobInvolvement,JobLevel,JobSatisfaction,MonthlyIncome,
+                              MonthlyRate,Attrition))
+head(intgrp2)
+#Group 3
+intgrp3 = as.data.frame(data %>%select(TotalWorkingYears,
+                      TrainingTimesLastYear,YearsAtCompany,
+                      YearsInCurrentRole,YearsSinceLastPromotion,,Attrition))
+head(intgrp3)
+#Group 4
+intgrp4 = as.data.frame(data %>%select(NumCompaniesWorked,PercentSalaryHike,WorkLifeBalance,PerformanceRating,
+                          RelationshipSatisfaction,YearsWithCurrManager,Attrition))
+head(intgrp4)
+
+```
+
+```{r}
+#GGPAIRS
+#########
+#Plotting GGPAIRS for the groups of 4 above
+#GGPAIRS FOR GROUP 1
+ggpairs(intgrp1, aes(color = Attrition))+ggtitle("Group 1 Attrition Plot")+xlab("Age,DailyRate,DistancefromHome,Education,StockOption,Environment")
+
+#From group 1, I will select Age and Education
+
+#GGPAIRS FOR GROUP 2
+ggpairs(intgrp2, aes(color = Attrition))+
+  ggtitle("Group 2 Attrition Plot")+xlab("HourlyRate,JobInvolvement,JobLevel,
+                                         JobSatisfaction,MonthlyIncome,MonthlyRate")
+
+#From group 2, I will select Hourly Rate and Monthly Income
+
+#GGPAIRS FOR GROUP 3
+ggpairs(intgrp3, aes(color = Attrition))+
+  ggtitle("Group 3 Attrition Plot")+xlab("TotalWorkingYears,TrainingTimesLastYear,
+                                         YearsAtCompany,
+                                         YearsInCurrentRole,YearsSinceLastPromotion,
+                                         YearsWithCurrManager")
+
+#From group 3, I will select Years Since Last Promoted and Years In Current Role
+
+#GGPAIRS FOR GROUP 4
+ggpairs(intgrp4, aes(color = Attrition))+
+  ggtitle("Group 4 Attrition Plot")+xlab("NumCompaniesWorked,PercentSalaryHike,PerformanceRating,
+                                         RelationshipSatisfaction,WorkLifeBalance,")
+
+#From group 4, I will select Performance Rating
+
+```
+
+```{r}
+## HISTOGRAM FOR ALL THE INTEGER VALUES TO BE ABLE TO SEE THEIR ATTRITION LEVELS
+#select integer variables from the data variables into a data-frame to be used for HISTOGRAM
+hist_int = data.frame(data %>% select(where(is.integer))%>%
+                            select(-ID, -EmployeeNumber, -StandardHours))
+hist_data = data.frame(hist_int, data$Attrition)
+data_long <- hist_data %>%
+  pivot_longer(cols = -data.Attrition, names_to = "Variable", values_to = "Value")
+
+# Plot flipped histograms
+ggplot(data_long, aes(x = Value, fill = data.Attrition)) +
+  geom_histogram(position = "identity") +
+  facet_wrap(~Variable, scales = "free") +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Flipped Histograms of Integer Values by Attrition",
+       x = "Value",
+       y = "Count",
+       fill = "data.Attrition")
+
+```
+
+```{r}
+###SELECTING THE MOST IMPORTANT VARIABLES FROM THE 4 GGPAIRS GROUPS ABOVE
+cogent_data = data.frame(data%>%select(Age,DailyRate,Education,HourlyRate,
+                                       TotalWorkingYears,StockOptionLevel,
+                                       RelationshipSatisfaction,YearsAtCompany,
+                                       YearsInCurrentRole))
+
+cogent_data1 = data.frame(data%>%select(Age,Education,HourlyRate,
+                                       MonthlyIncome,YearsSinceLastPromotion,
+                                       YearsInCurrentRole,PerformanceRating))
+
+imp_data = data.frame(cogent_data, data$Attrition)
+data_long <- imp_data %>%
+  pivot_longer(cols = -data.Attrition, names_to = "Variable", values_to = "Value")
+
+#plot histogram to check the sorted data
+ggplot(data_long, aes(x = Value, fill = data.Attrition)) +
+  geom_histogram(position = "identity") +
+  facet_wrap(~Variable, scales = "free") +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Flipped Histograms of Integer Values by Attrition as Sorted Using GGPairs",
+       x = "Value",
+       y = "Count",
+       fill = "data.Attrition")
+
+imp_data1 = data.frame(cogent_data1, data$Attrition)
+data_long1 <- imp_data1 %>%
+  pivot_longer(cols = -data.Attrition, names_to = "Variable", values_to = "Value")
+
+#plot histogram to check the sorted data
+ggplot(data_long1, aes(x = Value, fill = data.Attrition)) +
+  geom_histogram(position = "identity") +
+  facet_wrap(~Variable, scales = "free") +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Flipped Histograms of Integer Values by Attrition as Sorted Using GGPairs",
+       x = "Value",
+       y = "Count",
+       fill = "data.Attrition")
+
+```
+
+```{r}
+
+###SELECTING THE MOST IMPORTANT VARIABLES FROM THE STRING VARIABLES ABOVE
+imp_string = as.data.frame(data%>% select(BusinessTravel,Department,MaritalStatus,
+                                             Gender,EducationField,JobRole,Attrition))
+data_long = imp_string%>%pivot_longer(cols = -Attrition, 
+                                              names_to = "Variable", values_to = "Value")
+ggplot(data_long, aes(x = Value, fill = Attrition)) +
+  geom_bar(position = "dodge") +
+  facet_wrap(~Variable, scales = "free") +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Composite Bar Chart by Attrition For String Values",
+       x = "Categories",
+       y = "Count",
+       fill = "Attrition")
+
+```
+
+
+
+
+```{r}
+#######################
+#MODELING - NAIVE BAYES
+#######################
+
+model_data <- data.frame(
+  Age = c(24, 27, 30, 31, 34, 37, 40, 45, 50, 52, 60),
+  Education = c(1, 2, 3, 4, 5, 2, 3, 5, 4, 4, 1),
+  HourlyRate = c(73, 44, 60, 88, 48, 32, 90, 87, 92, 78, 56),
+  MonthlyIncome = c(4403, 19626, 10422, 3760, 8793, 2127, 6694, 2203, 5063, 9362, 10000),
+  PerformanceRating = c(3, 3, 4, 4, 3, 3, 4, 4, 3, 3, 4),
+  YearsInCurrentRole = c(2, 7, 10, 3, 0, 1, 4, 5, 6, 8, 9),
+  YearsSinceLastPromotion = c(0, 1, 2, 0, 3, 4, 0, 5, 6, 0, 7),
+  BusinessTravel = c("Travel_Rarely", "Travel_Frequently", "Non_Travel",
+                     "Travel_Frequently", "Travel_Rarely", "Travel_Frequently",
+                     "Non_Travel", "Travel_Frequently", "Travel_Rarely",
+                     "Travel_Frequently", "Travel_Rarely"),
+  Department = c("Sales", "R & D", "Sales", "R & D", "R & D",
+                 "Sales", "R & D", "HR", "R & D", "Sales", "HR"),
+  EducationField = c("Life Sc.", "Tech.Degree", "Other", "Medical",
+                     "Medical", "Marketing", "Life Sc.", "Life Sc.", "HR", "Life Sc.", "Medical"),
+  Gender = c("Male", "Female", "Male", "Male", "Female",
+             "Male", "Female", "Male", "Female", "Male", "Female"),
+  JobRole = c("Sales Rep", "Sales Rep", "Sales Ex", "Sales Ex", "Res Sc",
+               "Res Sc", "Mger", "Lab Tech", "HR", "Health Rep", "Lab Tech"),
+  MaritalStatus = c("Single", "Married", "Single", "Single", "Married", "Divorced",
+                    "Single", "Married", "Single", "Married", "Single"),
+  Attrition = c("Yes", "No", "No", "No", "Yes", "No", "Yes", "No", "Yes", "No", "No")
+)
+
+model_data
+
+set.seed(123)
+train_indices <- sample(1:nrow(model_data), size = 0.7 * nrow(model_data))
+train_data1 <- model_data[train_indices, ]
+test_data1 <- model_data[-train_indices, ]
+
+# Train Naive Bayes model
+model_2 = naiveBayes(Attrition~.,data = model_data)
+
+# Make predictions on test data
+test_predictions1 <- predict(model_2, test_data1)
+
+# Create confusion matrix
+table(test_predictions1, test_data1$Attrition)
+# Print confusion matrix
+CM = confusionMatrix(table(test_predictions1, test_data1$Attrition))
+CM
+CM$overall["Accuracy"]
+CM$byClass["Sensitivity"]
+CM$byClass["Specificity"]
+
+#Observation
+# the model above is not good because accuracy is showing 100% along with specificity and sensitivity.
+# I think i need to use the entire variable in the dataset for the model
+# Then i can I will checj the feature importance of the variables to know what i can do next.
+
+```
+
+```{r}
+
+#model_data1 = data %>%select(Age, MaritalStatus,Attrition)
+#model_1 = naiveBayes(Attrition~.,data = model_data1)
+# Predictions on the training data
+#predict(model_1,model_data1[,c(1,2)])
+#model_df1 = data.frame(Age = c(30),MaritalStatus = c("Single"))
+# Prediction for new data
+#predict(model_1,model_df1) #just classifications
+#predict(model_1,model_df1, type = "raw") #gives probabilities
+#confusionMatrix(Prediction))
+
+model_data1 = data %>%select(Age,Education,HourlyRate,MaritalStatus,
+                             MonthlyIncome,PerformanceRating,
+                             YearsInCurrentRole,YearsSinceLastPromotion,
+                             BusinessTravel,Department,EducationField,
+                             Gender,JobRole,MaritalStatus,Attrition)
+# Train-test split
+set.seed(123)
+train_indices <- sample(1:nrow(model_data1), size = 0.7 * nrow(model_data1))
+train_data <- model_data1[train_indices, ]
+test_data <- model_data1[-train_indices, ]
+
+# Train Naive Bayes model
+model_1 = naiveBayes(Attrition~.,data = model_data1)
+
+# Make predictions on test data
+test_predictions <- predict(model_1, test_data)
+
+# Create confusion matrix
+table(test_predictions, test_data$Attrition)
+# Print confusion matrix
+CM3 = confusionMatrix(table(test_predictions, test_data$Attrition))
+CM3
+CM3$overall["Accuracy"]
+CM3$byClass["Sensitivity"]
+CM3$byClass["Specificity"]
+
+mi <- mutinformation(model_data1$Attrition, model_data1[, -5])
+print(mi)
+
+mi_values <- sapply(model_data1[-5], function(x) mutinformation(model_data1$Attrition, x))
+
+# Create a data frame for visualization
+mi_df <- data.frame(Feature = names(mi_values), Importance = as.numeric(mi_values))
+   
+# Create a bar plot
+ggplot(mi_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  coord_flip() +
+  labs(title = "Feature Importance (Mutual Information)",
+       x = "Features",
+       y = "Mutual Information") +
+       theme_minimal()
+
+#Observation
+#The result is a little better here
+# Accuracy has improved to 78.54%
+#Specificity 19.23% and Sensitivity 93.30%
+#I am going to feed all the data into the model and see if things would improve
+
+#####################
+#ALL THE VARIABLE EXCEPT EMPLOYEE NUMBER 
+####################
+model_data2 = data%>%select(-EmployeeNumber, -ID)
+# Train-test split
+set.seed(123)
+train_indices2 <- sample(1:nrow(model_data2), size = 0.7 * nrow(model_data2))
+train_data2 <- model_data2[train_indices2, ]
+test_data2 <- model_data2[-train_indices2, ]
+
+# Train Naive Bayes model
+model_2 = naiveBayes(Attrition~.,data = model_data2)
+
+# Make predictions on test data
+test_predictions2 <- predict(model_2, test_data2)
+
+# Create confusion matrix
+table(test_predictions2, test_data2$Attrition)
+# Print confusion matrix
+CM2 = confusionMatrix(table(test_predictions2, test_data2$Attrition))
+CM2
+CM2$overall["Accuracy"]
+CM2$byClass["Sensitivity"]
+CM2$byClass["Specificity"]
+
+mi2 <- mutinformation(model_data2$Attrition, model_data2[, -5])
+print(mi2)
+
+mi_values2 <- sapply(model_data2[-5], function(x) mutinformation(model_data2$Attrition, x))
+
+# Create a data frame for visualization
+mi_df2 <- data.frame(Feature = names(mi_values2), Importance = as.numeric(mi_values2))
+   
+# Create a bar plot
+ggplot(mi_df2, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  coord_flip() +
+  labs(title = "NB Feature Importance (Attrition Scale)",
+       x = "Variables",
+       y = "Attrition Scale") +
+       theme_minimal()
+
+#Observation
+#The result is a  better here
+# Accuracy has improved to 83.52%
+#Specificity 61.54% and Sensitivity 89%
+#This model is very good because its statistics is better than the others
+
+
+################
+#USING THE TESTING DATA TO PREDICT
+###############
+
+#passing the testing data into the model for prediction
+new_data = as.data.frame(read.csv(file.choose(),header = TRUE))
+new_data
+
+#call the model used above for training 
+model_2 <- naiveBayes( Attrition~ ., data = train_data2)
+#passing the test data into the model
+prediction_test <- predict(model_2, newdata = new_data)
+prediction_test
+
+#concatenate the testing data with the prediction result to combine them into a data frame
+predicted_data = data.frame(new_data, prediction_test)
+
+#check the result
+table(prediction_test, predicted_data$prediction_test)
+# Print confusion matrix
+CM4 = confusionMatrix(table(prediction_test, predicted_data$prediction_test))
+CM4
+CM4$overall["Accuracy"]
+CM4$byClass["Sensitivity"]
+CM4$byClass["Specificity"]
+
+#write the new predicted data frame into a csv file
+write.csv(predicted_data, "Case1PredictionsSamsonAkomolafeAttrition1.csv")
+
+
+
+
+```
+
+
+```{r}
+#################
+#KNN - MODEL
+################
+
+knn_model = data%>%select(-EmployeeNumber, -ID)
+
+# Convert categorical variables (factors) to numeric 
+knn_model$BusinessTravel <- as.numeric(factor(knn_model$BusinessTravel))
+knn_model$MaritalStatus <- as.numeric(factor(knn_model$MaritalStatus))
+knn_model$JobRole <- as.numeric(factor(knn_model$JobRole))
+knn_model$EducationField <- as.numeric(factor(knn_model$EducationField))
+knn_model$Gender <- as.numeric(factor(knn_model$Gender))
+knn_model$Department <- as.numeric(factor(knn_model$Department))
+knn_model$OverTime <- as.numeric(factor(knn_model$OverTime))
+knn_model$Over18 <- as.numeric(factor(knn_model$Over18))
+
+knn_model$Attrition = knn_model$Attrition
+
+# Split the data into training and testing sets
+set.seed(123) # For reproducibility
+index <- sample(2, nrow(knn_model), replace = TRUE, prob = c(0.7, 0.3))
+knn_train_data <- knn_model[index == 1,]
+knn_test_data <- knn_model[index == 2,]
+
+# Separate features (predictors) and target variable
+knn_train_features <- knn_train_data[, -2] # Exclude Attrition
+knn_test_features <- knn_test_data[, -2]
+knn_train_labels <- knn_train_data$Attrition
+knn_test_labels <- knn_test_data$Attrition
+
+# Build the k-NN Model ---
+
+sum(is.na(knn_train_features)) # Check for NAs in training features
+sum(is.na(knn_test_features))
+
+# Choose the value of k (number of neighbors)
+k <- 5 
+
+# Apply k-NN
+knn_predictions <- knn(train = knn_train_features, 
+                   test = knn_test_features, 
+                   cl = knn_train_labels, 
+                   k = k)
+
+#Evaluate Model Performance ---
+knn_predictions <- factor(knn_predictions)
+knn_test_data$Attrition <- factor(knn_test_data$Attrition)
+
+
+#Check and Set Levels (if needed):
+levels(knn_predictions) # Check levels of predictions
+levels(knn_test_data$Attrition) # Check levels of true labels
+
+confusionMatrix(knn_predictions, knn_test_data$Attrition)
+
+
+#determine the feature importance of the model
+knn_mi <- mutinformation(knn_model$Attrition, knn_model[, -5])
+print(knn_mi)
+
+knn_mi_values <- sapply(knn_model[-5], function(x) mutinformation(knn_model$Attrition, x))
+
+# Create a data frame for visualization
+knn_mi_df2 <- data.frame(Feature = names(knn_mi_values), Importance = as.numeric(knn_mi_values))
+   
+# Create a bar plot
+ggplot(knn_mi_df2, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  coord_flip() +
+  labs(title = "KNN Feature Importance (Attrition Scale)",
+       x = "Variables",
+       y = "Attrition Scale") +
+       theme_minimal()
+
+```
+
+```{r}
+
+###########
+#COMPARE NB AND KNN MODEL 
+###########
+
+nb_conf_matrix <- confusionMatrix(table(test_predictions2, test_data2$Attrition))
+nb_accuracy = nb_conf_matrix$overall["Accuracy"]
+nb_sensitivity = nb_conf_matrix$byClass["Sensitivity"]
+nb_specificity = nb_conf_matrix$byClass["Specificity"]
+
+knn_conf_matrix <- confusionMatrix(knn_predictions, knn_test_data$Attrition)
+knn_accuracy = knn_conf_matrix$overall["Accuracy"]
+knn_sensitivity = knn_conf_matrix$byClass["Sensitivity"]
+knn_specificity = knn_conf_matrix$byClass["Specificity"]
+
+
+compare_result = data.frame(nb_accuracy,knn_accuracy,nb_sensitivity,
+                            knn_sensitivity,nb_specificity,knn_specificity)
+
+compare_result
+
+
+
+#Visualize Confusion Matrices 
+
+# Create confusion matrices as data frames for plotting
+knn_cm_df <- as.data.frame(knn_conf_matrix$table)
+nb_cm_df <- as.data.frame(nb_conf_matrix$table)
+
+# Add correct column names
+colnames(knn_cm_df) <- c("Prediction", "Reference", "Freq")
+colnames(nb_cm_df) <- c("Prediction", "Reference", "Freq")
+
+# Plot confusion matrices side by side (using ggplot2)
+knn_plot <- ggplot(knn_cm_df, aes(Prediction, Reference, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = sprintf("%1.0f", Freq)), vjust = 1) +
+  scale_fill_gradient(low = "white", high = "skyblue") +
+  ggtitle("k-NN Confusion Matrix")
+
+knn_plot
+
+nb_plot <- ggplot(nb_cm_df, aes(Prediction, Reference, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = sprintf("%1.0f", Freq)), vjust = 1) +
+  scale_fill_gradient(low = "white", high = "skyblue") +
+  ggtitle("Naive Bayes Confusion Matrix")
+
+nb_plot
+
+grid.arrange(knn_plot, nb_plot, ncol = 2)
+
+```
+```{r}
+
+
+#My Youtube video link
+
+https://youtu.be/oUTqTq31UPs
+
+```
+
+
